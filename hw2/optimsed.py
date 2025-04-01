@@ -13,6 +13,7 @@ EXPERIMENT_RUNS = 10
 RUNTIME_RUNS = 25
 
 
+# --- Node Class (as provided by user) ---
 class Node:
     __slots__ = ("gain", "neighbors", "prev", "next", "partition", "moved")
 
@@ -24,226 +25,363 @@ class Node:
         self.partition = partition
         self.moved = False
 
+# --- Node Class (required by FM) ---
+class Node:
+    __slots__ = ("gain", "neighbors", "prev", "next", "partition", "moved")
 
+    def __init__(self, gain=0, neighbors=None, prev=-1, next=-1, partition=0):
+        self.gain = gain
+        # Ensure neighbors is a set for efficient lookups if needed later
+        self.neighbors = set(neighbors) if neighbors is not None else set()
+        self.prev = prev
+        self.next = next
+        self.partition = partition
+        self.moved = False
+
+# --- Helper: Calculate Gain (required by FM) ---
 def calculate_gain(node_idx, solution, graph):
-    """
-    Calculates the gain for moving a node to the opposite partition.
-    This version assumes vertices are 0-indexed.
-    """
+    """ Calculates the gain for moving node_idx to the opposite partition. """
     gain = 0
-    for neighbor in graph[node_idx]:
-        if solution[neighbor] == solution[node_idx]:
-            gain -= 1
+    n = len(solution)
+    if not (0 <= node_idx < n and node_idx < len(graph)):
+         # print(f"Warning: Invalid node_idx {node_idx} in calculate_gain.")
+         return 0 # Return neutral gain on error
+
+    current_partition = solution[node_idx]
+    # Ensure graph[node_idx] is iterable
+    neighbors = graph[node_idx] if hasattr(graph[node_idx], '__iter__') else []
+
+    for neighbor in neighbors:
+        if not (0 <= neighbor < n):
+             # print(f"Warning: Invalid neighbor index {neighbor} for node {node_idx}.")
+             continue # Skip invalid neighbor
+
+        if solution[neighbor] == current_partition:
+            gain -= 1 # Internal edge decreases gain
         else:
-            gain += 1
+            gain += 1 # External edge increases gain
     return gain
 
+# --- Helper: Insert node into gain bucket list (required by FM) ---
+def insert_node(nodes, gain_lists, max_gain, node_index, max_degree_adj):
+    """ Inserts node_index into the correct gain bucket's linked list. """
+    # Add basic safety checks
+    if not (0 <= node_index < len(nodes)): return
 
-def insert_node(nodes, gain_lists, max_gain, node_index, max_degree):
-    """
-    Inserts a node into the doubly-linked list corresponding to its gain.
-    """
-    gain = nodes[node_index].gain
-    part = nodes[node_index].partition
-    gain_index = gain + max_degree
-    nodes[node_index].next = gain_lists[part][gain_index]
-    if gain_lists[part][gain_index] != -1:
-        nodes[gain_lists[part][gain_index]].prev = node_index
-    gain_lists[part][gain_index] = node_index
-    nodes[node_index].prev = -1
+    node = nodes[node_index]
+    gain = node.gain
+    part = node.partition
+    gain_index = gain + max_degree_adj # Calculate index in the gain array
+
+    if not (0 <= part < len(gain_lists) and 0 <= gain_index < len(gain_lists[part])):
+         # print(f"Error: Invalid index in insert_node. Node: {node_index}, Part: {part}, Gain: {gain}, MaxDegree: {max_degree_adj}, Index: {gain_index}")
+         return
+
+    node.next = gain_lists[part][gain_index] # Point to the current head
+    node.prev = -1 # This node is the new head
+
+    head_node_idx = gain_lists[part][gain_index]
+    if head_node_idx != -1: # If list wasn't empty
+         if 0 <= head_node_idx < len(nodes): # Check index validity
+             nodes[head_node_idx].prev = node_index # Old head points back to new node
+         # else: print(f"Error: Invalid head node index {head_node_idx} in insert_node.")
+
+    gain_lists[part][gain_index] = node_index # Update head pointer in gain array
+
     if gain > max_gain[part]:
         max_gain[part] = gain
 
+# --- Helper: Remove node from gain bucket list (required by FM) ---
+def remove_node(nodes, gain_lists, node_index, max_degree_adj):
+    """ Removes node_index from its gain bucket's linked list. """
+    if not (0 <= node_index < len(nodes)): return
 
-def remove_node(nodes, gain_lists, node_index, max_degree):
-    """
-    Removes a node from the doubly-linked list.
-    """
-    gain = nodes[node_index].gain
-    part = nodes[node_index].partition
-    gain_index = gain + max_degree
-    if nodes[node_index].prev != -1:
-        nodes[nodes[node_index].prev].next = nodes[node_index].next
+    node = nodes[node_index]
+    gain = node.gain
+    part = node.partition
+    gain_index = gain + max_degree_adj
+
+    if not (0 <= part < len(gain_lists) and 0 <= gain_index < len(gain_lists[part])):
+        # print(f"Error: Invalid index in remove_node. Node: {node_index}, Part: {part}, Gain: {gain}, MaxDegree: {max_degree_adj}, Index: {gain_index}")
+        return
+
+    prev_node_idx = node.prev
+    next_node_idx = node.next
+
+    # Update next pointer of the previous node (or head pointer)
+    if prev_node_idx != -1:
+         if 0 <= prev_node_idx < len(nodes):
+             nodes[prev_node_idx].next = next_node_idx
+         # else: print(f"Error: Invalid prev_node index {prev_node_idx} in remove_node.")
     else:
-        gain_lists[part][gain_index] = nodes[node_index].next
-    if nodes[node_index].next != -1:
-        nodes[nodes[node_index].next].prev = nodes[node_index].prev
-    nodes[node_index].prev = -1
-    nodes[node_index].next = -1
+        # This node was the head of the list
+        gain_lists[part][gain_index] = next_node_idx
+
+    # Update previous pointer of the next node
+    if next_node_idx != -1:
+        if 0 <= next_node_idx < len(nodes):
+             nodes[next_node_idx].prev = prev_node_idx
+        # else: print(f"Error: Invalid next_node index {next_node_idx} in remove_node.")
+
+    node.prev = -1
+    node.next = -1
 
 
-def update_max_gain(gain_lists, max_gain, max_degree):
-    """
-    Updates the maximum gain pointers after node movements.
-    """
+# --- Helper: Update max gain pointer (required by FM) ---
+def update_max_gain(gain_lists, max_gain, max_degree_adj):
+    """ Finds the new highest non-empty gain bucket. """
+    min_gain = -max_degree_adj
     for part in range(2):
-        while (
-            max_gain[part] >= -max_degree
-            and gain_lists[part][max_gain[part] + max_degree] == -1
-        ):
-            max_gain[part] -= 1
-        if max_gain[part] < -max_degree:  # Correctly handle empty gain lists
-            max_gain[part] = -max_degree
-            for g in range(-max_degree, max_degree + 1):
-                if gain_lists[part][g + max_degree] != -1:
-                    max_gain[part] = g
-                    break
+        current_max = max_gain[part]
+        while current_max >= min_gain:
+            gain_index = current_max + max_degree_adj
+            if not (0 <= gain_index < len(gain_lists[part])):
+                 # print(f"Error: Invalid index in update_max_gain search. Part: {part}, Gain: {current_max}, MaxDegree: {max_degree_adj}, Index: {gain_index}")
+                 current_max = min_gain - 1 # Force exit
+                 break
+
+            if gain_lists[part][gain_index] != -1:
+                max_gain[part] = current_max
+                break
+            current_max -= 1
+        else:
+            # Loop finished without break, all buckets empty or invalid gain
+            max_gain[part] = min_gain - 1 # Indicate no nodes available
 
 
-def fm_heuristic(solution, graph, max_passes=FM_PASSES):
+# --- Helper: Basic Balance Function (required by FM if input unbalanced / fallback) ---
+def balance_child(child_list):
+    """ Fallback basic balancer if needed """
+    n = len(child_list)
+    if n == 0: return child_list
+    target_ones = n // 2
+    try:
+        # Ensure list contains only 0s and 1s before counting
+        child_list_clean = [int(bit) for bit in child_list if int(bit) in (0, 1)]
+        if len(child_list_clean) != n:
+             print("Warning: balance_child input contained non-binary values.")
+             # Decide how to handle - returning original might be safest
+             return child_list
+
+        current_ones = child_list_clean.count(1)
+    except (TypeError, ValueError):
+         print("Error: Non-numeric type found during balance_child count.")
+         return child_list # Return original on error
+
+    diff = current_ones - target_ones
+    indices = list(range(n)) # Get indices once
+
+    if diff > 0: # Too many ones
+        ones_indices = [i for i in indices if child_list_clean[i] == 1]
+        # Check if we have enough nodes to flip
+        if len(ones_indices) >= diff:
+             indices_to_flip = random.sample(ones_indices, diff)
+             for i in indices_to_flip: child_list_clean[i] = 0
+        else:
+             print(f"Error: balance_child logic error - Cannot flip {diff} ones, only {len(ones_indices)} found.")
+             # Cannot balance, return original or potentially raise error
+             return child_list
+    elif diff < 0: # Too many zeros
+        num_to_flip = -diff
+        zeros_indices = [i for i in indices if child_list_clean[i] == 0]
+        # Check if we have enough nodes to flip
+        if len(zeros_indices) >= num_to_flip:
+             indices_to_flip = random.sample(zeros_indices, num_to_flip)
+             for i in indices_to_flip: child_list_clean[i] = 1
+        else:
+             print(f"Error: balance_child logic error - Cannot flip {num_to_flip} zeros, only {len(zeros_indices)} found.")
+             # Cannot balance, return original or potentially raise error
+             return child_list
+
+    return child_list_clean
+
+
+# --- Helper: Fitness Function (required by FM) ---
+def fitness_function(solution, graph):
+    n = len(solution)
+    if n == 0: return 0
+    total = 0
+    for i in range(n):
+        # Add checks similar to calculate_gain for robustness
+        if i < len(graph) and hasattr(graph[i], '__iter__') and i < len(solution):
+             part_i = solution[i]
+             for nb in graph[i]:
+                 if 0 <= nb < n:
+                     if part_i != solution[nb]:
+                         total += 1
+                 # else: Optional warning for invalid neighbor index
+        # else: Optional warning for invalid node index
+    return total // 2
+
+# --- Main FM Heuristic Function ---
+def fm_heuristic(initial_solution, graph, max_passes=FM_PASSES): # Default max_passes to 10 as often used
     """
-    Fiduccia-Mattheyses heuristic for graph bipartitioning using a doubly-linked list.
-    Ensures balanced partitions.
+    Fiduccia-Mattheyses heuristic based on Prac2.pdf description.
+    Ensures returned solution is balanced by discarding passes if best state is imbalanced.
+    Uses gain buckets for efficiency.
 
     Args:
-        solution (list): Initial partition assignment (0 or 1) for each vertex.
-        graph (list): List of adjacency lists for each vertex (0-indexed).
-        max_passes (int): Maximum number of passes to perform.
+        initial_solution (list): Initial balanced partition (0s and 1s).
+        graph (list): Adjacency list/set representation.
+        max_passes (int): Max outer passes (rebuild lists and find best prefix).
 
     Returns:
-        tuple: (optimized_solution, passes_performed)
+        tuple: (optimized_balanced_solution, passes_performed)
     """
-    n = len(solution)
-    max_degree = max(len(neighbors) for neighbors in graph)
+    n = len(initial_solution)
+    if n == 0: return initial_solution.copy(), 0
+    target_part_size = n // 2
 
-    # Initialize nodes and gain lists
-    nodes = [Node() for _ in range(n)]
-    gain_lists = [[-1] * (2 * max_degree + 1) for _ in range(2)]
-    max_gain = [-max_degree] * 2
+    working_solution = initial_solution.copy()
+    if working_solution.count(0) != target_part_size:
+        print("Warning: fm_heuristic_new received imbalanced input. Balancing using balance_child.")
+        working_solution = balance_child(working_solution) # Ensure start is balanced
 
+    # --- Pre-calculate Max Degree ---
+    max_degree = 0
     for i in range(n):
-        nodes[i].gain = calculate_gain(i, solution, graph)
-        nodes[i].neighbors = graph[i]
-        nodes[i].partition = solution[i]
-        nodes[i].moved = False
+        if i < len(graph) and hasattr(graph[i], '__iter__'):
+             max_degree = max(max_degree, len(graph[i]))
+    max_degree_adj = max(1, max_degree)
+    gain_list_size = 2 * max_degree_adj + 1
+    min_gain = -max_degree_adj
 
-        insert_node(nodes, gain_lists, max_gain, i, max_degree)
+    nodes = [Node() for _ in range(n)]
 
-    best_solution = solution.copy()
-    best_cut_size = fitness_function(solution, graph)
+    best_solution_overall = working_solution.copy()
+    best_overall_cut_size = fitness_function(best_solution_overall, graph)
 
-    improved = True
-    passes = 0
+    # --- Outer Loop (Passes) ---
+    improved_in_cycle = True # Assume improvement possible initially
+    passes_done = 0
+    while improved_in_cycle and passes_done < max_passes:
+        #improved_in_cycle = False # Reset for this pass
+        passes_done += 1
+        print(passes_done)
+        solution_at_pass_start = working_solution.copy()
 
-    while improved and passes < max_passes:
-        improved = False
-        passes += 1
+        # --- Initialize for the pass ---
+        gain_lists = [[-1] * gain_list_size for _ in range(2)]
+        max_gain = [min_gain - 1] * 2
 
-        # Reset moved flags and rebuild gain lists
-        for i in range(n):
-            nodes[i].moved = False
-        gain_lists = [[-1] * (2 * max_degree + 1) for _ in range(2)]
-        max_gain = [-max_degree] * 2
         indices = list(range(n))
-        random.shuffle(indices)  # shuffling is key!
+        random.shuffle(indices)
         for i in indices:
-            nodes[i].gain = calculate_gain(i, solution, graph)
-            insert_node(nodes, gain_lists, max_gain, i, max_degree)
-        moves = []
-        cumulative_gain = 0
-        best_cumulative_gain = 0
-        best_move_index = -1
-        num_moved_part0 = 0  # Track moved nodes from partition 0
-        num_moved_part1 = 0  # Track moved nodes from partition 1
-        initial_part0_count = solution.count(0)
-        initial_part1_count = n - initial_part0_count
+            nodes[i].moved = False
+            nodes[i].partition = working_solution[i]
+            nodes[i].neighbors = graph[i] if i < len(graph) and graph[i] else set()
+            nodes[i].gain = calculate_gain(i, working_solution, graph)
+            if min_gain <= nodes[i].gain <= max_degree_adj:
+                 insert_node(nodes, gain_lists, max_gain, i, max_degree_adj)
+            # else: Warning about gain out of bounds could be added
 
-        # Process all vertices in one pass
-        for _ in range(n):
-            best_node = -1
-            best_gain_val = float("-inf")
-            best_part = -1  # Store the best partition
+        # --- Inner Loop (Sequence of N moves) ---
+        moves_sequence = []
+        cumulative_gains = [0.0] # Gain relative to start of pass
 
-            for part in range(2):
-                if (
-                    max_gain[part] > best_gain_val
-                    and gain_lists[part][max_gain[part] + max_degree] != -1
-                ):
-                    potential_node = gain_lists[part][max_gain[part] + max_degree]
+        for k in range(n):
+            best_node_to_move = -1
+            selected_gain = -float('inf')
 
-                    # --- Balance Check ---
-                    if part == 0:
-                        # Check the number of nodes is not under the limit if we removed one.
-                        if (initial_part0_count - (num_moved_part0 + 1)) >= (
-                            n // 2
-                        ) - 1:
-                            best_gain_val = max_gain[part]
-                            best_node = potential_node
-                            best_part = part  # Important
-                    elif part == 1:
-                        # Check the number of nodes is not under the limit if we removed one.
+            # Find best valid (unlocked, balance-permitting) node
+            for part_from in range(2):
+                current_max_g = max_gain[part_from]
+                while current_max_g >= min_gain:
+                     gain_idx = current_max_g + max_degree_adj
+                     if not (0 <= gain_idx < gain_list_size): break
 
-                        if (initial_part1_count - (num_moved_part1 + 1)) >= (
-                            n // 2
-                        ) - 1:
-                            best_gain_val = max_gain[part]
-                            best_node = potential_node
-                            best_part = part
+                     node_idx_in_bucket = gain_lists[part_from][gain_idx]
+                     found_candidate_this_bucket = False
+                     while node_idx_in_bucket != -1:
+                         if not nodes[node_idx_in_bucket].moved:
+                             # Relaxed Balance Check (check counts *before* the move)
+                             current_part0_count = working_solution.count(0) # Count in current state
+                             is_move_valid = False
+                             if part_from == 0: # Moving from 0
+                                 if current_part0_count > target_part_size - 1: is_move_valid = True
+                             else: # Moving from 1
+                                 if (n - current_part0_count) > target_part_size - 1: is_move_valid = True
 
-            if best_node == -1:
-                break  # No more nodes to move
+                             if is_move_valid:
+                                 best_node_to_move = node_idx_in_bucket
+                                 selected_gain = nodes[best_node_to_move].gain
+                                 found_candidate_this_bucket = True
+                                 break
+                         node_idx_in_bucket = nodes[node_idx_in_bucket].next
+                     if found_candidate_this_bucket: break
+                     current_max_g -= 1
+                if best_node_to_move != -1: break
 
-            # Move the selected node
-            nodes[best_node].moved = True
-            remove_node(nodes, gain_lists, best_node, max_degree)
-            old_partition = solution[best_node]
-            solution[best_node] = 1 - solution[best_node]
-            nodes[best_node].partition = solution[best_node]
+            if best_node_to_move == -1: break # No more valid moves
 
-            # --- Update Moved Counts ---
-            if old_partition == 0:
-                num_moved_part0 += 1
-            else:
-                num_moved_part1 += 1
+            # --- Perform the move ---
+            node_to_move_idx = best_node_to_move
+            original_partition = nodes[node_to_move_idx].partition
 
-            cumulative_gain += best_gain_val
-            moves.append(best_node)
+            nodes[node_to_move_idx].moved = True
+            remove_node(nodes, gain_lists, node_to_move_idx, max_degree_adj)
+            working_solution[node_to_move_idx] = 1 - original_partition # Update working solution
+            nodes[node_to_move_idx].partition = working_solution[node_to_move_idx]
 
-            if cumulative_gain > best_cumulative_gain:
-                best_cumulative_gain = cumulative_gain
-                best_move_index = len(moves) - 1
+            moves_sequence.append(node_to_move_idx)
+            cumulative_gains.append(cumulative_gains[-1] + selected_gain)
 
-            # Recompute gains for all neighbors
-            for neighbor in nodes[best_node].neighbors:
-                if not nodes[neighbor].moved:
-                    remove_node(nodes, gain_lists, neighbor, max_degree)
-                    new_gain = calculate_gain(neighbor, solution, graph)
-                    nodes[neighbor].gain = new_gain
-                    insert_node(nodes, gain_lists, max_gain, neighbor, max_degree)
+            # Update gains of unlocked neighbors
+            for neighbor_idx in nodes[node_to_move_idx].neighbors:
+                if not nodes[neighbor_idx].moved:
+                    # Delta depends on neighbor's partition relative to moved node's *original* partition
+                    gain_delta = 2 if working_solution[neighbor_idx] == original_partition else -2
 
-            update_max_gain(gain_lists, max_gain, max_degree)
+                    neighbor_gain_before = nodes[neighbor_idx].gain
+                    neighbor_gain_index_before = neighbor_gain_before + max_degree_adj
+                    if 0 <= neighbor_gain_index_before < gain_list_size:
+                        remove_node(nodes, gain_lists, neighbor_idx, max_degree_adj)
 
-        # Rollback moves beyond the best point in this pass
-        # Ensure that after rollback, the partitions remain balanced.
-        if best_move_index >= 0:
-            for i in range(len(moves) - 1, best_move_index, -1):
-                node_idx = moves[i]
-                solution[node_idx] = 1 - solution[node_idx]  # Correct Rollback
+                    nodes[neighbor_idx].gain += gain_delta
+                    neighbor_gain_index_after = nodes[neighbor_idx].gain + max_degree_adj
+                    if 0 <= neighbor_gain_index_after < gain_list_size:
+                        insert_node(nodes, gain_lists, max_gain, neighbor_idx, max_degree_adj)
 
-            current_cut_size = fitness_function(solution, graph)
-            if current_cut_size < best_cut_size:
-                best_cut_size = current_cut_size
-                best_solution = solution.copy()
-                improved = True
-            else:  # Important: revert to best solution.
-                solution = best_solution.copy()
+            update_max_gain(gain_lists, max_gain, max_degree_adj)
+        # --- End of Inner Loop ---
 
-        else:  # Important: roll back all changes
-            solution = best_solution.copy()
+        # --- Find Best Prefix and Rollback ---
+        if not moves_sequence: continue # No moves, no improvement this pass
 
-    return best_solution, passes
+        best_k = np.argmax(cumulative_gains) # Index in cumulative_gains list
+        best_num_moves = best_k
 
+        # Rollback: Reconstruct the solution state after 'best_num_moves'
+        solution_after_rollback = solution_at_pass_start.copy()
+        for i in range(best_num_moves):
+            node_idx = moves_sequence[i]
+            solution_after_rollback[node_idx] = 1 - solution_after_rollback[node_idx]
 
-def fitness_function(solution, graph):
-    """
-    Computes the fitness as the number of cut-edges between partitions.
-    """
-    total = 0
-    for i, neighbors in enumerate(graph):
-        for nb in neighbors:
-            if solution[i] != solution[nb]:
-                total += 1
-    return total // 2
+        # --- Check Balance and Decide ---
+        final_solution_this_pass = solution_after_rollback # Tentative solution
+        current_cut_size = fitness_function(final_solution_this_pass, graph)
+
+        if final_solution_this_pass.count(0) != target_part_size:
+            # Best state was imbalanced. Discard pass results.
+            working_solution = solution_at_pass_start.copy()
+            # improved_in_cycle remains False
+        else:
+            # Best state was balanced. Update overall best if better.
+            if current_cut_size < best_overall_cut_size:
+                 best_overall_cut_size = current_cut_size
+                 best_solution_overall = final_solution_this_pass.copy()
+                 improved_in_cycle = True # Improvement found!
+            # Set working solution for next pass
+            working_solution = final_solution_this_pass.copy()
+
+    # --- End of Outer Loop (Passes) ---
+
+    # Final check (should ideally pass now)
+    if best_solution_overall.count(0) != target_part_size:
+         print(f"CRITICAL ERROR: fm_heuristic_new final solution is not balanced!")
+
+    return best_solution_overall, passes_done
+
 
 
 def read_graph_data(filename):
@@ -294,28 +432,74 @@ def mutate(solution, mutation_size):
     return mutated
 
 
-def MLS(graph, num_starts, time_limit=None):
+def MLS(graph, num_starts, max_total_passes=None, time_limit=None):
     """
-    Multi-start Local Search.
-    Applies FM local search to multiple random starting solutions.
-    Includes an optional time limit.
+    Multi-start Local Search with cumulative pass limit and time limit.
+
+    Args:
+        graph (list): Adjacency list/set representation.
+        num_starts (int): Number of random restarts.
+        max_total_passes (int, optional): Cumulative FM pass limit for the entire run.
+        time_limit (float, optional): Wall-clock time limit in seconds.
+
+    Returns:
+        tuple: (best_solution_found, total_passes_consumed)
+               Returns (None, total_passes_consumed) if time/pass limit reached before finding any solution.
     """
     best_solution = None
     best_fit = float("inf")
-    start_time = time.perf_counter()  # Record start time
+    start_time = time.perf_counter()
+    total_passes_consumed = 0
 
-    for _ in range(num_starts):
-        if time_limit is not None and time.perf_counter() - start_time >= time_limit:
-            break  # Exit if time limit reached
+    for i in range(num_starts):
+        current_time = time.perf_counter()
+        # --- Check Limits BEFORE starting a new FM run ---
+        if time_limit is not None and current_time - start_time >= time_limit:
+            print(f"  MLS: Time limit reached after {i} starts.")
+            break
+        if max_total_passes is not None and total_passes_consumed >= max_total_passes:
+            print(f"  MLS: Pass limit reached after {i} starts.")
+            break
 
-        sol = generate_random_solution()
-        local_opt, _ = fm_heuristic(sol, graph)
-        fit = fitness_function(local_opt, graph)
-        if fit < best_fit:
-            best_fit = fit
-            best_solution = local_opt.copy()  # Use .copy() for safety
+        # --- Prepare for FM call ---
+        sol = generate_random_solution() # Generate new initial solution
+        remaining_passes = float('inf') # Default if no pass limit
+        if max_total_passes is not None:
+            remaining_passes = max_total_passes - total_passes_consumed
+            if remaining_passes <= 0: # Should be caught by check above, but safety
+                 print(f"  MLS: No passes remaining before start {i+1}.")
+                 break
+            # FM heuristic internally stops after max_passes_per_call passes
+            # OR when no improvement is found in a pass. Pass the remaining budget.
 
-    return best_solution
+        # --- Call FM Heuristic ---
+        try:
+            # Assuming fm_heuristic_new is the correct function name
+            local_opt, passes_this_call = fm_heuristic(
+                sol,
+                graph,
+                max_passes=int(remaining_passes) # Pass remaining budget as the limit
+            )
+            total_passes_consumed += passes_this_call # Add passes actually used
+
+            if local_opt is not None:
+                fit = fitness_function(local_opt, graph)
+                if fit < best_fit:
+                    best_fit = fit
+                    best_solution = local_opt.copy()
+            # else: fm_heuristic potentially returned None (e.g., if input was bad)
+
+        except Exception as e:
+            print(f"  Error during fm_heuristic_new call in MLS start {i+1}: {e}")
+            # Decide how to handle: continue, break? Continuing for now.
+            continue
+
+    # --- End of Loop ---
+    final_time = time.perf_counter()
+    print(f"  MLS finished. Starts completed: {i+1}/{num_starts}. Total Passes: {total_passes_consumed}. Time: {final_time-start_time:.4f}s. Best Fitness: {best_fit if best_solution else 'N/A'}")
+
+    # Return None if no solution was ever found (e.g., limits too tight)
+    return best_solution, total_passes_consumed
 
 
 def ILS(graph, initial_solution, mutation_size, time_limit=None):
@@ -392,11 +576,11 @@ def ILS_annealing(graph, initial_solution, mutation_size, time_limit=None):
 
 def ILS_adaptive(graph, initial_solution, time_limit=None):
     """Adaptive ILS.  Includes a time limit."""
-    initial_mutation_mean = 8
+    initial_mutation_mean = 15
     mutation_std_dev = 2
     decay_factor = 0.98
     stagnation_threshold = 50
-    max_iterations = 2000  # Keep a max iteration count, even with time limit
+    max_iterations = 1000  # Keep a max iteration count, even with time limit
     min_mutation_size = 1
     max_mutation_size = 50
     restart_reset = True
@@ -494,67 +678,120 @@ def ILS_adaptive(graph, initial_solution, time_limit=None):
 
 def GLS(graph, population_size, stopping_crit=None, time_limit=None):
     """
-    Genetic Local Search.  Includes a time limit.
+    Genetic Local Search. Includes a time limit check during initialization and evolution.
     """
-    num_starts = 5
-    population = [MLS(graph, num_starts) for _ in range(population_size)]
-    fitness_values = [fitness_function(sol, graph) for sol in population]
+    start_time = time.perf_counter() # Start timer BEFORE initialization
+    num_starts = 5 # As used in your original code for initializing population members
+    population = []
+    fitness_values = []
+
+    # --- Population Initialization with Time Limit Check ---
+    print(f"  GLS Initializing population (size {population_size})...")
+    for i in range(population_size):
+        # Check time limit before starting the next MLS run for initialization
+        if time_limit is not None and time.perf_counter() - start_time >= time_limit:
+            print(f"  GLS Time limit reached during population initialization (after {i} individuals).")
+            # If time runs out during init, we might have an incomplete population.
+            # Depending on requirements, either proceed with smaller pop or handle error.
+            # For now, we proceed with the partially initialized population if any.
+            break
+
+        # Run MLS for one individual - pass a portion of the remaining time?
+        # Or let MLS run without time limit for init? Simpler: let MLS run normally for init.
+        # The outer check will eventually stop the initialization loop.
+        try:
+             # We do not pass the time_limit to the MLS calls during initialization
+             # as the main GLS time limit check handles stopping the overall process.
+             sol = MLS(graph, num_starts)
+             if sol is not None: # Ensure MLS returned a valid solution
+                 population.append(sol)
+                 fitness_values.append(fitness_function(sol, graph))
+             else:
+                 print(f"  Warning: MLS during GLS init (individual {i+1}) returned None.")
+                 # Optionally, retry or break if this happens often
+        except Exception as e:
+            print(f"  Error during MLS in GLS init (individual {i+1}): {e}")
+            # Decide how to handle: continue, break, etc. Continuing for now.
+            continue
+
+    # Check if population was initialized at all
+    if not population:
+        print("  GLS Error: Population initialization failed or stopped early by time limit. Returning None.")
+        # Return a sensible default or None if no solution could be generated in time
+        return generate_random_solution() # Or return None
+
+    print(f"  GLS Initialization complete. Population size: {len(population)}. Time elapsed: {time.perf_counter() - start_time:.4f}s")
+
+    # Find initial best from the generated population
     best_fit = min(fitness_values)
     best_solution = population[fitness_values.index(best_fit)]
     generation_without_improvement = 0
-    start_time = time.perf_counter()  # Record start time
 
-    for _ in range(10000):  # Large iteration limit
+    # --- Evolutionary Loop with Time Limit Check ---
+    # Use a large number, rely on time_limit or stopping_crit
+    MAX_GENERATIONS = 100000
+    print("  GLS Starting evolutionary loop...")
+    for gen in range(MAX_GENERATIONS):
+        # Check time limit at the start of each generation
         if time_limit is not None and time.perf_counter() - start_time >= time_limit:
-            break  # Exit if time limit reached
+            print(f"  GLS Time limit reached during evolution at generation {gen}.")
+            break # Exit evolutionary loop
 
-        if generation_without_improvement >= stopping_crit:
-            break
-        parent1 = random.choice(population)
-        parent2 = random.choice(population)
+        # Check stopping criterion based on generations without improvement
+        # Make sure stopping_crit is not None if used
+        if stopping_crit is not None and generation_without_improvement >= stopping_crit:
+            print(f"  GLS Stopping criterion met at generation {gen}.")
+            break # Exit evolutionary loop
+
+        # Standard GLS steps
+        parent1_idx = random.randrange(len(population))
+        parent2_idx = random.randrange(len(population))
+        parent1 = population[parent1_idx]
+        parent2 = population[parent2_idx]
         child = crossover(parent1, parent2)
-        child_opt, _ = fm_heuristic(child, graph)
-        fit_child = fitness_function(child_opt, graph)
-        worst_fit = max(fitness_values)
-        worst_index = fitness_values.index(worst_fit)
-        if fit_child <= worst_fit:
-            population[worst_index] = child_opt.copy()
-            fitness_values[worst_index] = fit_child
+
+        # Run FM heuristic on the child
+        # We assume fm_heuristic itself doesn't need a time limit here,
+        # as the main loop's time check is the primary control.
+        try:
+            child_opt, _ = fm_heuristic(child, graph)
+            if child_opt is None: # Handle potential issues in fm_heuristic if needed
+                 print(f"  Warning: fm_heuristic returned None in generation {gen}. Skipping replacement.")
+                 continue
+            fit_child = fitness_function(child_opt, graph)
+        except Exception as e:
+             print(f"  Error during fm_heuristic or fitness calculation in generation {gen}: {e}")
+             continue # Skip this generation's replacement
+
+        # Find worst individual for replacement
+        worst_fit_idx = np.argmax(fitness_values) # More efficient way to find index of max
+        worst_fit = fitness_values[worst_fit_idx]
+
+        # Replacement (Steady-State)
+        if fit_child <= worst_fit: # Replace if better or equal
+            population[worst_fit_idx] = child_opt.copy()
+            fitness_values[worst_fit_idx] = fit_child
             if fit_child < best_fit:
                 best_fit = fit_child
                 best_solution = child_opt.copy()
                 generation_without_improvement = 0
+                # Optional: print improvement
+                # print(f"  GLS Gen {gen}: New best fitness {best_fit}")
             else:
-                generation_without_improvement += 1
+                 # Fitness improved vs worst, but not overall best
+                 generation_without_improvement += 1
         else:
+            # Child was not better than the worst
             generation_without_improvement += 1
+
+    print(f"  GLS Finished. Total time: {time.perf_counter() - start_time:.4f}s. Best fitness: {best_fit}")
+    # Return the best solution found within the time limit / stopping criteria
     return best_solution
 
 
 def get_hamming_distance(parent1, parent2):
     """Compute the Hamming distance between two solutions."""
     return sum(1 for a, b in zip(parent1, parent2) if a != b)
-
-
-def balance_child(child):
-    """
-    Adjusts a child solution to restore balance.
-    Ensures that the total number of ones is equal to NUM_VERTICES/2.
-    """
-    target = len(child) // 2
-    current_ones = sum(child)
-    indices = list(range(len(child)))
-    if current_ones > target:
-        ones_indices = [i for i in indices if child[i] == 1]
-        to_flip = random.sample(ones_indices, current_ones - target)
-        for i in to_flip:
-            child[i] = 0
-    elif current_ones < target:
-        zeros_indices = [i for i in indices if child[i] == 0]
-        to_flip = random.sample(zeros_indices, target - current_ones)
-        for i in to_flip:
-            child[i] = 1
-    return child
 
 
 def crossover(parent1, parent2):
@@ -812,234 +1049,229 @@ def run_ILS_annealing_runtime_experiment(graph, time_limit, mutation_size):
 
 
 if __name__ == "__main__":
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    graph = read_graph_data(os.path.join(script_dir, "Graph500.txt"))
+    # --- Essential Setup ---
+    # Make sure necessary imports like 'time', 'os', 'numpy', 'pandas', 'random' are done above
+    # Make sure all required functions like 'read_graph_data', 'MLS', 'ILS', 'GLS',
+    # 'fm_heuristic', 'fitness_function', etc., are defined above.
+
+    try:
+        # Determine script directory for reliable file access
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Construct the full path to the graph file
+        graph_file_path = os.path.join(script_dir, "Graph500.txt")
+        # Check if graph file exists before trying to read
+        if not os.path.exists(graph_file_path):
+             raise FileNotFoundError(f"Graph file not found at: {graph_file_path}")
+        graph = read_graph_data(graph_file_path)
+        print("Graph data loaded successfully.")
+    except Exception as e:
+        print(f"Error during setup: {e}")
+        print("Please ensure 'Graph500.txt' is in the same directory as the script and functions are defined.")
+        exit() # Exit if setup fails
+    # === TEMPORARY BLOCK FOR TIMING 10000 FM PASSES ===
+    print("\n--- Measuring Time for 10000 FM Passes ---")
+    NUM_TIMING_RUNS = 10  # Number of times to measure for stability
+    PASSES_TO_TIME = 10000 # The exact number of passes to time
+    fm_times = []
+
+    # Ensure graph is loaded from setup above
+    if 'graph' not in locals():
+         print("Error: Graph not loaded. Cannot run timing.")
+    else:
+         for i in range(NUM_TIMING_RUNS):
+             print(f"  Timing Run {i + 1}/{NUM_TIMING_RUNS}...")
+             # Generate a fresh random balanced solution for each timing run
+             initial_sol = generate_random_solution()
+             if initial_sol.count(0) != len(initial_sol)//2: # Double check balance
+                  print("Error: generate_random_solution did not produce balanced solution.")
+                  continue
+
+             start_time = time.perf_counter()
+             # Call fm_heuristic_new forcing it to run exactly PASSES_TO_TIME
+             try:
+                  _, passes_executed = fm_heuristic(
+                      initial_sol,
+                      graph,
+                      max_passes=PASSES_TO_TIME,
+
+                  )
+                  end_time = time.perf_counter()
+
+                  # Verify if it actually ran the intended number of passes
+                  if passes_executed == PASSES_TO_TIME:
+                       duration = end_time - start_time
+                       fm_times.append(duration)
+                       print(f"    Time for {passes_executed} passes: {duration:.6f} seconds")
+                  else:
+                       print(f"    Warning: FM did not execute expected {PASSES_TO_TIME} passes (executed {passes_executed}). Skipping this run.")
+
+             except Exception as e:
+                  print(f"    Error during fm_heuristic_new timing run: {e}")
+
+         # Calculate and print median/average time
+         if fm_times:
+             median_fm_time = np.median(fm_times)
+             average_fm_time = np.mean(fm_times)
+             print("\n  --- FM Timing Summary ---")
+             print(f"  Recorded Times: {[float(f'{t:.6f}') for t in fm_times]}")
+             print(f"  Median Time for {PASSES_TO_TIME} passes: {median_fm_time:.6f} seconds")
+             print(f"  Average Time for {PASSES_TO_TIME} passes: {average_fm_time:.6f} seconds")
+             print("\n  Use this Median Time as the DYNAMIC_TIME_LIMIT for runtime experiments.")
+             # You can assign it directly here if this code stays before the runtime experiments
+             # DYNAMIC_TIME_LIMIT = median_fm_time
+         else:
+             print("\n  No valid FM times were recorded.")
+
+    print("--- End of FM Timing Measurement ---")
+    # === END OF TEMPORARY BLOCK ===
+
+    # --- Your original main experiment code follows ---
+    # DYNAMIC_TIME_LIMIT = ... # Make sure this is set using the median time above
+    # print(f"Using Dynamic Time Limit: {DYNAMIC_TIME_LIMIT:.6f} seconds...")
+    # ... (Rest of your main block running parameter and runtime experiments) ...
+    # --- Constants ---
+    # EXPERIMENT_RUNS = 10 # For pass-based comparison
+    # RUNTIME_RUNS = 25    # Number of runs for the time-based comparison
+    # Use the median time you measured as the dynamic time limit
+    DYNAMIC_TIME_LIMIT = 3.261090 # seconds (based on your median measurement)
+    print(f"Using Dynamic Time Limit: {DYNAMIC_TIME_LIMIT:.6f} seconds for runtime experiments.")
+
 
     # -----------------------------
-    # Parameter experiments (fixed FM passes)
+    # Parameter experiments (Comparison a)
+    # Runs based on your interpretation (e.g., FM_PASSES per FM call)
     # -----------------------------
+    print("\n--- Running Parameter Experiments (Comparison a) ---")
+    # These run EXPERIMENT_RUNS (10) times each
     mls_results = run_MLS_experiment(graph)
     ils_annealing_results = run_ILS_annealing_experiment(graph)
     simple_ils_results = run_simple_ILS_experiment(graph)
     gls_results = run_GLS_experiment(graph)
     ils_adaptive_results = run_ILS_adaptive_experiment(graph)
 
-    # -----------------------------
-    # Runtime experiments (equal clock time)
-    # -----------------------------
 
-    TIME_LIMIT = 10  # Set the time limit to 60 seconds
+    # -----------------------------
+    # Runtime experiments (Comparison b - Fixed Time Limit)
+    # Run RUNTIME_RUNS (25) times each, using DYNAMIC_TIME_LIMIT
+    # -----------------------------
+    print(f"\n--- Running Runtime Experiments ({RUNTIME_RUNS} runs each, Time Limit: {DYNAMIC_TIME_LIMIT:.6f}s) ---")
 
-    mls_runtime = run_MLS_runtime_experiment(graph, TIME_LIMIT)
-    ils_annealing_runtime = run_ILS_annealing_runtime_experiment(
-        graph, TIME_LIMIT, mutation_size=50
-    )
-    ils_simple_runtime = run_ILS_runtime_experiment(graph, TIME_LIMIT, mutation_size=50)
-    ils_adaptive_runtime = run_ILS_adaptive_runtime_experiment(graph, TIME_LIMIT)
-    gls_runtime = run_GLS_runtime_experiment(graph, TIME_LIMIT, 2)
+    all_runtime_results_list = [] # Store results directly in the final format
+
+    # --- Define parameters needed for specific runtime algorithms ---
+    # Choose best performing mutation size based on parameter experiments if possible
+    # Placeholder: Determine these from analysis of simple_ils_results / ils_annealing_results
+    best_ils_mutation_size = 50 # Example: Choose based on median fitness from comparison (a)
+    best_ils_annealing_mutation_size = 50 # Example: Choose based on median fitness from comparison (a)
+    # Choose best GLS stopping criterion based on comparison (a)
+    best_gls_stopping_crit = 2 # Example: Choose based on median fitness from comparison (a)
+    # ILS_adaptive parameters are internal to the function in your current script
+
+    # Loop for the 25 runtime repetitions
+    for i in range(RUNTIME_RUNS):
+        print(f"\nRuntime Repetition {i + 1}/{RUNTIME_RUNS}")
+
+        # MLS Runtime
+        print("  Running MLS (runtime)...")
+        mls_run_res = run_MLS_runtime_experiment(graph, DYNAMIC_TIME_LIMIT)
+        for res_tuple in mls_run_res:
+             all_runtime_results_list.append({
+                 "Experiment": "MLS_Runtime", "Run": i, "Mutation_Size": "", "Stopping_Crit": "",
+                 "Fitness": res_tuple[2], "Comp_Time": res_tuple[3], "Unchanged_Count": "", "Solution": res_tuple[1]
+             })
+
+        # ILS Annealing Runtime
+        print("  Running ILS Annealing (runtime)...")
+        ils_a_run_res = run_ILS_annealing_runtime_experiment(graph, DYNAMIC_TIME_LIMIT, best_ils_annealing_mutation_size)
+        for res_tuple in ils_a_run_res:
+             all_runtime_results_list.append({
+                 "Experiment": "ILS_Annealing_Runtime", "Run": i, "Mutation_Size": res_tuple[5], "Stopping_Crit": "",
+                 "Fitness": res_tuple[2], "Comp_Time": res_tuple[3], "Unchanged_Count": res_tuple[4], "Solution": res_tuple[1]
+             })
+
+        # ILS Simple Runtime
+        print("  Running ILS Simple (runtime)...")
+        ils_s_run_res = run_ILS_runtime_experiment(graph, DYNAMIC_TIME_LIMIT, best_ils_mutation_size)
+        for res_tuple in ils_s_run_res:
+             all_runtime_results_list.append({
+                 "Experiment": "ILS_Simple_Runtime", "Run": i, "Mutation_Size": res_tuple[5], "Stopping_Crit": "",
+                 "Fitness": res_tuple[2], "Comp_Time": res_tuple[3], "Unchanged_Count": res_tuple[4], "Solution": res_tuple[1]
+             })
+
+        # GLS Runtime
+        print("  Running GLS (runtime)...")
+        gls_run_res = run_GLS_runtime_experiment(graph, DYNAMIC_TIME_LIMIT, best_gls_stopping_crit)
+        for res_tuple in gls_run_res:
+             all_runtime_results_list.append({
+                 "Experiment": "GLS_Runtime", "Run": i, "Mutation_Size": "", "Stopping_Crit": res_tuple[6],
+                 "Fitness": res_tuple[2], "Comp_Time": res_tuple[3], "Unchanged_Count": "", "Solution": res_tuple[1]
+             })
+
+        # ILS Adaptive Runtime
+        print("  Running ILS Adaptive (runtime)...")
+        ils_ad_run_res = run_ILS_adaptive_runtime_experiment(graph, DYNAMIC_TIME_LIMIT)
+        for res_tuple in ils_ad_run_res:
+             all_runtime_results_list.append({
+                 "Experiment": "ILS_Adaptive_Runtime", "Run": i, "Mutation_Size": res_tuple[5], # final_mut_mean
+                 "Stopping_Crit": "", "Fitness": res_tuple[2], "Comp_Time": res_tuple[3],
+                 "Unchanged_Count": res_tuple[4], # stagnation count
+                 "Solution": res_tuple[1]
+             })
+
 
     # -----------------------------
     # Combine all results into a single CSV file.
     # -----------------------------
-    all_rows = []
+    print("\n--- Aggregating All Results ---")
+    all_rows = [] # Start with an empty list
 
-    # Parameter Experiments:
+    # --- Append Parameter Experiment Results (Comparison a) ---
+    print("  Adding results from Parameter Experiments...")
+    # Add results from the pass-based experiments run earlier
     for run, sol, fitness, comp_time, _, _, _ in mls_results:
-        all_rows.append(
-            {
-                "Experiment": "MLS",
-                "Run": run,
-                "Mutation_Size": "",
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": "",
-                "Solution": sol,
-            }
-        )
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        mutation_size,
-        _,
-    ) in ils_annealing_results:
-        all_rows.append(
-            {
-                "Experiment": "ILS_Annealing",
-                "Run": run,
-                "Mutation_Size": mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
-
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        mutation_size,
-        _,
-    ) in simple_ils_results:
-        all_rows.append(
-            {
-                "Experiment": "Simple_ILS",
-                "Run": run,
-                "Mutation_Size": mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
+         all_rows.append({
+             "Experiment": "MLS_PassBased", "Run": run, "Mutation_Size": "", "Stopping_Crit": "",
+             "Fitness": fitness, "Comp_Time": comp_time, "Unchanged_Count": "", "Solution": sol
+         })
+    for run, sol, fitness, comp_time, unchanged_count, mutation_size, _ in ils_annealing_results:
+         all_rows.append({
+             "Experiment": "ILS_Annealing_PassBased", "Run": run, "Mutation_Size": mutation_size, "Stopping_Crit": "",
+             "Fitness": fitness, "Comp_Time": comp_time, "Unchanged_Count": unchanged_count, "Solution": sol
+         })
+    for run, sol, fitness, comp_time, unchanged_count, mutation_size, _ in simple_ils_results:
+         all_rows.append({
+             "Experiment": "Simple_ILS_PassBased", "Run": run, "Mutation_Size": mutation_size, "Stopping_Crit": "",
+             "Fitness": fitness, "Comp_Time": comp_time, "Unchanged_Count": unchanged_count, "Solution": sol
+         })
     for run, sol, fitness, comp_time, _, _, stopping_crit in gls_results:
-        all_rows.append(
-            {
-                "Experiment": "GLS",
-                "Run": run,
-                "Mutation_Size": "",
-                "Stopping_Crit": stopping_crit,
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": "",
-                "Solution": sol,
-            }
-        )
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        final_mutation_size,
-        _,
-    ) in ils_adaptive_results:
-        all_rows.append(
-            {
-                "Experiment": "ILS_Adaptive",
-                "Run": run,
-                "Mutation_Size": final_mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
+         all_rows.append({
+             "Experiment": "GLS_PassBased", "Run": run, "Mutation_Size": "", "Stopping_Crit": stopping_crit,
+             "Fitness": fitness, "Comp_Time": comp_time, "Unchanged_Count": "", "Solution": sol
+         })
+    for run, sol, fitness, comp_time, unchanged_count, final_mutation_size, _ in ils_adaptive_results:
+         all_rows.append({
+             "Experiment": "ILS_Adaptive_PassBased", "Run": run, "Mutation_Size": final_mutation_size, "Stopping_Crit": "",
+             "Fitness": fitness, "Comp_Time": comp_time, "Unchanged_Count": unchanged_count, # Using Unchanged for stagnation
+             "Solution": sol
+         })
 
-    # Runtime Experiments:
-    for run, sol, fitness, comp_time, _, _, _ in mls_runtime:
-        all_rows.append(
-            {
-                "Experiment": "MLS_Runtime",
-                "Run": run,
-                "Mutation_Size": "",
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": "",
-                "Solution": sol,
-            }
-        )
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        mutation_size,
-        _,
-    ) in ils_annealing_runtime:
-        all_rows.append(
-            {
-                "Experiment": "ILS_Annealing_Runtime",
-                "Run": run,
-                "Mutation_Size": mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        mutation_size,
-        _,
-    ) in ils_simple_runtime:
-        all_rows.append(
-            {
-                "Experiment": "ILS_Simple_Runtime",
-                "Run": run,
-                "Mutation_Size": mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
-    for run, sol, fitness, comp_time, _, _, stopping_crit in gls_runtime:
-        all_rows.append(
-            {
-                "Experiment": "GLS_Runtime",
-                "Run": run,
-                "Mutation_Size": "",
-                "Stopping_Crit": stopping_crit,
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": "",
-                "Solution": sol,
-            }
-        )
+    # --- Append Runtime Experiment Results (Comparison b) ---
+    print(f"  Adding results from {RUNTIME_RUNS} Runtime Experiment repetitions...")
+    all_rows.extend(all_runtime_results_list)
 
-    for (
-        run,
-        sol,
-        fitness,
-        comp_time,
-        unchanged_count,
-        final_mutation_size,
-        _,
-    ) in ils_adaptive_runtime:
-        all_rows.append(
-            {
-                "Experiment": "ILS_Adaptive_Runtime",
-                "Run": run,
-                "Mutation_Size": final_mutation_size,
-                "Stopping_Crit": "",
-                "Fitness": fitness,
-                "Comp_Time": comp_time,
-                "Unchanged_Count": unchanged_count,
-                "Solution": sol,
-            }
-        )
 
+    # --- Create and Save DataFrame ---
     df_experiments = pd.DataFrame(
         all_rows,
         columns=[
-            "Experiment",
-            "Run",
-            "Mutation_Size",
-            "Stopping_Crit",
-            "Fitness",
-            "Comp_Time",
-            "Unchanged_Count",
-            "Solution",
-        ],
+            "Experiment", "Run", "Mutation_Size", "Stopping_Crit",
+            "Fitness", "Comp_Time", "Unchanged_Count", "Solution"
+        ]
     )
 
-    df_experiments.to_csv("experiment_results.csv", index=False)
-    print("All experiment results saved in 'experiment_results.csv'.")
+    # Define the output file path relative to the script directory
+    output_csv_path = os.path.join(script_dir, "experiment_results_combined.csv")
+
+    df_experiments.to_csv(output_csv_path, index=False)
+    print(f"\nAll combined experiment results saved in '{output_csv_path}'.")
+    print("\n--- Experiment Script Finished ---")
