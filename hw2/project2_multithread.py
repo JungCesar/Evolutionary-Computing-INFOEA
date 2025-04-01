@@ -1015,8 +1015,8 @@ def ILS_adaptive(graph, initial_solution, max_total_passes=None, time_limit=None
     # Parameters for adaptive mutation
     initial_mutation_mean = 15.0 # Starting average mutation size
     mutation_std_dev = 2.0    # Starting standard deviation for mutation size
-    decay_factor = 0.98       # Factor to reduce mutation strength on improvement
-    increase_factor = 1.1     # Factor to increase mutation strength on stagnation
+    decay_factor = 0.95       # Factor to reduce mutation strength on improvement
+    increase_factor = 1.5     # Factor to increase mutation strength on stagnation
     stagnation_threshold = 50 # Iterations without improvement to trigger increase
     max_iterations = 100000   # Default limit if no other limits active
     min_mutation_size = 1
@@ -1534,7 +1534,7 @@ if __name__ == "__main__":
 
         # --- Submit ILS Annealing Pass-Limited Runs ---
         print("  Submitting ILS Annealing Pass-Limited runs...")
-        mutation_sizes_ils_a = [5, 25, 50, 75, 100, 125, 150]  # Example list
+        mutation_sizes_ils_a = [1,5,15, 25, 35, 50, 75]  # Example list
         for ms in mutation_sizes_ils_a:
              print(f"    ILS Annealing Mutation Size: {ms}")
              for i in range(EXPERIMENT_RUNS):
