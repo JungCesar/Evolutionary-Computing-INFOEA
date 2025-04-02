@@ -1,0 +1,11 @@
+Comparison,P-Value,Result
+GLS (sto=1) vs ILS_Adaptive (mut=29),0.0000,"Significant (ILS_Adaptive (mut=29) better than GLS (sto=1), p=0.0000)"
+GLS (sto=1) vs ILS_Annealing (mut=40),0.3264,Not Significant (p=0.3264)
+GLS (sto=1) vs ILS_Simple,0.7486,Not Significant (p=0.7486)
+GLS (sto=1) vs MLS,0.0000,"Significant (MLS better than GLS (sto=1), p=0.0000)"
+ILS_Adaptive (mut=29) vs ILS_Annealing (mut=40),0.0000,"Significant (ILS_Adaptive (mut=29) better than ILS_Annealing (mut=40), p=0.0000)"
+ILS_Adaptive (mut=29) vs ILS_Simple,0.0000,"Significant (ILS_Adaptive (mut=29) better than ILS_Simple, p=0.0000)"
+ILS_Adaptive (mut=29) vs MLS,0.1333,Not Significant (p=0.1333)
+ILS_Annealing (mut=40) vs ILS_Simple,0.7782,Not Significant (p=0.7782)
+ILS_Annealing (mut=40) vs MLS,0.0000,"Significant (MLS better than ILS_Annealing (mut=40), p=0.0000)"
+ILS_Simple vs MLS,0.0000,"Significant (MLS better than ILS_Simple, p=0.0000)"
