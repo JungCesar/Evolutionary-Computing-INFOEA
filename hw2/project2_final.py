@@ -483,7 +483,7 @@ def ILS_annealing(graph, initial_solution, mutation_size, max_total_passes=None,
 
 def ILS_adaptive(graph, initial_solution, max_total_passes=None, time_limit=None):
     """ Adaptive ILS with limits and adjusted parameters. """
-    initial_mutation_mean = 40; mutation_std_dev = 5.0; decay_factor = 0.98
+    initial_mutation_mean = 80; mutation_std_dev = 2.0; decay_factor = 0.99
     increase_factor = 1.2; stagnation_threshold = 50; max_iterations = 100000
     min_mutation_size = 1; max_mutation_size = NUM_VERTICES // 4
     stagnation_window=15; stagnation_tolerance=0.0001; restart_reset=True
