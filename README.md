@@ -9,16 +9,15 @@ Julius Bijkerk (1987011)
 
 ---
 
-## 📌 Overview
+## Overview
 
 This repository contains our final implementation and analysis for Practical Assignment 2 of the Evolutionary Computation course. The project focuses on solving the **Graph Bipartitioning Problem (GBP)** using multiple metaheuristic strategies.
 
-All experiments and figures in the report were generated from a single Python script:  
-👉 `project2_gridsearch.py`
+All experiments and figures in the report were generated from a single Python script: `project2_gridsearch.py`
 
 ---
 
-## 🧠 Methods Implemented
+## Methods Implemented
 
 - **MLS** – Multi-start Local Search  
 - **ILS** – Iterated Local Search (with greedy, SA, and adaptive variants)  
@@ -27,13 +26,13 @@ All experiments and figures in the report were generated from a single Python sc
 
 ---
 
-## 🧪 Experiment Design
+## Experiment Design
 
 Two main evaluation settings:
 1. **Fixed FM Passes** (10,000 passes)
 2. **Fixed Runtime** (based on average MLS runtime)
 
-Variants of ILS tested include:
+The variants of ILS tested include:
 - Simulated Annealing acceptance (ILS-SA)
 - Adaptive mutation size (ILS-A)
 
