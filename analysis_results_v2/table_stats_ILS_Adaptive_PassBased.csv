@@ -1,2 +1,2 @@
 Count,Fitness_Min,Fitness_Median,Fitness_Mean,Fitness_StdDev,Fitness_Max,Best_Fitness_Count,Time_Mean,Time_StdDev,Passes_Mean,Passes_StdDev,Unchanged_Mean,Unchanged_StdDev
-10,10,12.0000,12.3000,2.0575,17,2/10,55.3052,0.5839,10000.0000,0.0000,,
+10,3,6.5000,6.4000,2.0111,10,1/10,56.7005,0.1597,10000.0000,0.0000,,

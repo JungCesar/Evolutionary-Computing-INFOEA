@@ -1,0 +1,6 @@
+Group,Count,Fitness_Min,Fitness_Median,Fitness_Mean,Fitness_StdDev,Fitness_Max,Best_Fitness_Count,Time_Mean,Time_StdDev,Passes_Mean,Passes_StdDev,Unchanged_Mean,Unchanged_StdDev
+GLS (stop=1),25,2,4.0000,4.7200,1.9261,8,4/25,60.0039,0.0027,10181.1200,108.7950,,
+ILS_Adaptive (tuned),25,2,6.0000,6.4800,2.4345,12,1/25,60.0069,0.0064,10517.0000,34.3972,,
+ILS_Annealing (mut=80),25,7,9.0000,9.0800,1.6563,13,5/25,60.0058,0.0049,10512.7200,71.6697,0.0000,0.0000
+ILS_Simple (mut=75),25,2,7.0000,6.5600,2.4509,11,1/25,60.0054,0.0050,10511.6400,43.8205,0.0000,0.0000
+MLS,25,6,11.0000,11.0400,2.2818,15,1/25,60.0066,0.0047,10550.4400,18.4867,,

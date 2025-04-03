@@ -1,0 +1,11 @@
+Comparison,P-Value,Result
+GLS (stop=1) vs ILS_Adaptive (tuned),0.0059,"Significant (GLS (stop=1) better than ILS_Adaptive (tuned), p=0.0059)"
+GLS (stop=1) vs ILS_Annealing (mut=80),0.0000,"Significant (GLS (stop=1) better than ILS_Annealing (mut=80), p=0.0000)"
+GLS (stop=1) vs ILS_Simple (mut=75),0.0040,"Significant (GLS (stop=1) better than ILS_Simple (mut=75), p=0.0040)"
+GLS (stop=1) vs MLS,0.0000,"Significant (GLS (stop=1) better than MLS, p=0.0000)"
+ILS_Adaptive (tuned) vs ILS_Annealing (mut=80),0.0001,"Significant (ILS_Adaptive (tuned) better than ILS_Annealing (mut=80), p=0.0001)"
+ILS_Adaptive (tuned) vs ILS_Simple (mut=75),0.8298,Not Significant (p=0.8298)
+ILS_Adaptive (tuned) vs MLS,0.0000,"Significant (ILS_Adaptive (tuned) better than MLS, p=0.0000)"
+ILS_Annealing (mut=80) vs ILS_Simple (mut=75),0.0002,"Significant (ILS_Simple (mut=75) better than ILS_Annealing (mut=80), p=0.0002)"
+ILS_Annealing (mut=80) vs MLS,0.0006,"Significant (ILS_Annealing (mut=80) better than MLS, p=0.0006)"
+ILS_Simple (mut=75) vs MLS,0.0000,"Significant (ILS_Simple (mut=75) better than MLS, p=0.0000)"
