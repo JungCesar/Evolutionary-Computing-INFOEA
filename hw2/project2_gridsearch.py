@@ -1398,8 +1398,6 @@ def run_grid_search(graph, grid_search_pass_limit, grid_search_runs):
 
 
 # --- Revised Experiment Runners ---
-
-
 def run_MLS_experiment(graph):
     """Runs MLS 10 times, limited by FM_PASSES_LIMIT cumulative passes."""
     print("--- Running MLS Pass-Limited Experiment ---")
@@ -1637,8 +1635,6 @@ def run_ILS_annealing_experiment(graph, best_params):
 
 
 # --- Runtime Experiment Runners ---
-
-
 def run_MLS_runtime_experiment(graph, time_limit):
     """Runs MLS with a time limit and returns the actual duration."""
     start_run_time = time.perf_counter()  # Start timer
