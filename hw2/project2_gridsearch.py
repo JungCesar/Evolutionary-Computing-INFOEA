@@ -1930,7 +1930,7 @@ if __name__ == "__main__":
             graph_file_path = os.path.join(os.getcwd(), "Graph500.txt")
             if not os.path.exists(graph_file_path):
                 raise FileNotFoundError(
-                    f"Graph file 'Graph500.txt' not found in script directory or CWD."
+                    "Graph file 'Graph500.txt' not found in script directory or CWD."
                 )
 
         graph = read_graph_data(graph_file_path)
@@ -2264,9 +2264,9 @@ if __name__ == "__main__":
     )
 
     # Define output path relative to script directory
-    output_csv_path = os.path.join(
-        script_dir, "experiment_results_combined_gridsearch_runtimefix.csv"
-    )
+
+    output_file_name = "experiment_results_combined_gridsearch_runtimefix.csv"
+    output_csv_path = os.path.join(script_dir, output_file_name)
     try:
         df_experiments.to_csv(output_csv_path, index=False, float_format="%.6f")
         print(f"\nAll combined experiment results saved in '{output_csv_path}'.")
